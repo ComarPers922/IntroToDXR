@@ -27,7 +27,10 @@
 
 #pragma once
 
+#include <wrl/client.h>
+
 #include "Common.h"
+#include "Model.h"
 
 //--------------------------------------------------------------------------------------
 // Helpers
@@ -62,6 +65,7 @@ struct Vertex
 {
 	DirectX::XMFLOAT3 position;
 	DirectX::XMFLOAT2 uv;
+	DirectX::XMFLOAT3 normal;
 
 	bool operator==(const Vertex &v) const 
 	{
@@ -85,13 +89,7 @@ struct Material
 {
 	std::string name = "defaultMaterial";
 	std::string texturePath = "";
-	float  textureResolution = 512;
-};
-
-struct Model
-{
-	std::vector<Vertex> vertices;
-	std::vector<uint32_t> indices;
+	float textureResolution = 1024;
 };
 
 struct TextureInfo
@@ -106,12 +104,14 @@ struct TextureInfo
 struct MaterialCB 
 {
 	DirectX::XMFLOAT4 resolution;
+	DirectX::XMFLOAT4 crystalResolution;
 };
 
 struct ViewCB
 {
 	DirectX::XMMATRIX view = DirectX::XMMatrixIdentity();
 	DirectX::XMFLOAT4 viewOriginAndTanHalfFovY = DirectX::XMFLOAT4(0, 0.f, 0.f, 0.f);
+	// DirectX::XMFLOAT3 lightDir = DirectX::XMFLOAT3(-0.05, -0.58, 0.8);
 	DirectX::XMFLOAT2 resolution = DirectX::XMFLOAT2(1280, 720);
 };
 
@@ -204,6 +204,9 @@ struct D3D12Resources
 	float											rotationOffset = 0;
 	DirectX::XMFLOAT3								eyeAngle;
 	DirectX::XMFLOAT3								eyePosition;
+
+	std::shared_ptr<Model>							model;
+	Material										material;
 };
 
 struct D3D12Global
@@ -226,6 +229,10 @@ struct D3D12Global
 	int												width = 640;
 	int												height = 360;
 	bool											vsync = false;
+	Microsoft::WRL::ComPtr<ID3D12Resource>			globalGeometryResources;
+
+	ID3D12RootSignature*							globalRootSignature;
+	ID3D12RootSignature*							localRootSignature;
 };
 
 //--------------------------------------------------------------------------------------

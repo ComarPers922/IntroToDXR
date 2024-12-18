@@ -30,6 +30,12 @@
     <ClCompile Include="src\Graphics.cpp">
       <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="src\Model.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="Camera.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="shaders\ClosestHit.hlsl">
@@ -71,6 +77,12 @@
       <Filter>Include</Filter>
     </ClInclude>
     <ClInclude Include="include\Graphics.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Model.h">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="Camera.h">
       <Filter>Include</Filter>
     </ClInclude>
   </ItemGroup>

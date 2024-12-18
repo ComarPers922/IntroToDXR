@@ -25,8 +25,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "Window.h"
-
+#include <Window.h>
+#include <windowsx.h>
+#include "Common.h"
 #include <iostream>
 
 /**
@@ -34,6 +35,7 @@
  */
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 {
+	int xPos, yPos;
 	PAINTSTRUCT ps;
     switch( message ) 
 	{
@@ -42,13 +44,89 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             EndPaint( hWnd, &ps );
             break;
 		case WM_KEYUP:
-			if (wParam == VK_ESCAPE) PostQuitMessage(0);
+			{
+				if (wParam == VK_ESCAPE) PostQuitMessage(0);
+				auto curStatus = (int)Singleton<KeyBoardStatus>::instance;
+				if (wParam == 'W' || wParam == VK_UP)
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus ^ FORWARD);
+				}
+				else if (wParam == 'S' || wParam == VK_DOWN)
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus ^ BACK);
+				}
+
+				if (wParam == 'A' || wParam == VK_LEFT)
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus ^ LEFT);
+				}
+				else if (wParam == 'D' || wParam == VK_RIGHT)
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus ^ RIGHT);
+				}
+
+				if (wParam == 'Q')
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus ^ UP);
+				}
+				else if (wParam == 'E')
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus ^ DOWN);
+				}
+			}
 			break;
         case WM_DESTROY:
             PostQuitMessage( 0 );
             break;
+		case WM_KEYDOWN:
+			{
+				auto curStatus = (int)Singleton<KeyBoardStatus>::instance;
+				if (wParam == 'W' || wParam == VK_UP)
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus | FORWARD);
+				}
+				else if (wParam == 'S' || wParam == VK_DOWN)
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus | BACK);
+				}
+
+				if (wParam == 'A' || wParam == VK_LEFT)
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus | LEFT);
+				}
+				else if (wParam == 'D' || wParam == VK_RIGHT)
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus | RIGHT);
+				}
+
+				if (wParam == 'Q')
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus | UP);
+				}
+				else if (wParam == 'E')
+				{
+					Singleton<KeyBoardStatus>::instance = (KeyBoardStatus)(curStatus | DOWN);
+				}
+			}
+			break;
+		case WM_ENTERIDLE:
+			Singleton<KeyBoardStatus>::instance = NONE;
+			break;
+		case WM_RBUTTONDOWN:
+			Singleton<MouseStatus>::instance.isRightClicked = true;
+			POINT mousePoint;
+			GetCursorPos(&mousePoint);
+			Singleton<MouseStatus>::instance.SetRBtnPos(mousePoint.x, mousePoint.y);
+			ShowCursor(false);
+			break;
+		case WM_RBUTTONUP:
+			Singleton<MouseStatus>::instance.isRightClicked = false;
+			ShowCursor(true);
+			break;
         default:
-            return DefWindowProc( hWnd, message, wParam, lParam );
+			{
+				return DefWindowProc(hWnd, message, wParam, lParam);
+			}
     }
     return 0;
 }

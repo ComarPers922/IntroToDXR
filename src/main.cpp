@@ -25,9 +25,21 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*
+ * TODO List:
+ * 0. Find a way to load a secondary texture, so there will be two textures in the shader program. ��
+ * 1. Use ASSIMP to load a model. I can start with a simple model (like heart.obj) first, then construct a complex sence.
+ * 2. Do some simple GI in the simple. (Reflection)
+ * 3. Add lightings.
+ */
+
+#include <memory>
+
 #include "Window.h"
 #include "Graphics.h"
 #include "Utils.h"
+#include <shlobj.h>
+#include <strsafe.h>
 
 #ifdef _DEBUG
 #define _CRTDBG_MAP_ALLOC
@@ -53,8 +65,10 @@ public:
 		d3d.vsync = config.vsync;
 
 		// Load a model
-		Utils::LoadModel(config.model, model, material);
-
+		// Utils::LoadModel(config.model, model, material);
+		bearResources.model = std::shared_ptr<Model>(Model::ImportMeshFromFileOfIndex(config.model, 1, bearResources.material));
+		crystalResources.model = std::shared_ptr<Model>(Model::ImportMeshFromFileOfIndex(config.model, 0, crystalResources.material));
+		
 		// Initialize the shader compiler
 		D3DShaders::Init_Shader_Compiler(shaderCompiler);
 
@@ -67,25 +81,39 @@ public:
 		D3D12::Create_CommandList(d3d);
 		D3D12::Reset_CommandList(d3d);
 
-		// Create common resources
-		D3DResources::Create_Descriptor_Heaps(d3d, resources);
-		D3DResources::Create_BackBuffer_RTV(d3d, resources);
-		D3DResources::Create_Vertex_Buffer(d3d, resources, model);
-		D3DResources::Create_Index_Buffer(d3d, resources, model);
-		D3DResources::Create_Texture(d3d, resources, material);
-		D3DResources::Create_View_CB(d3d, resources);
-		D3DResources::Create_Material_CB(d3d, resources, material);
+		// Create common bearResources
+		D3DResources::Create_Descriptor_Heaps(d3d, bearResources);
+		D3DResources::Create_BackBuffer_RTV(d3d, bearResources);
+
+		D3DResources::Create_Vertex_Buffer(d3d, bearResources, *bearResources.model);
+		D3DResources::Create_Index_Buffer(d3d, bearResources, *bearResources.model);
+
+		D3DResources::Create_Vertex_Buffer(d3d, crystalResources, *crystalResources.model);
+		D3DResources::Create_Index_Buffer(d3d, crystalResources, *crystalResources.model);
+
+		D3DResources::Create_Texture(d3d, bearResources, bearResources.material);
+		D3DResources::Create_Texture(d3d, auxResources, CYAN_TEX_PATH);
+		D3DResources::Create_Texture(d3d, crystalResources, crystalResources.material);
+
+		D3DResources::Create_View_CB(d3d, bearResources);
+		D3DResources::Create_Material_CB(d3d, bearResources, crystalResources);
 		
-		// Create DXR specific resources
-		DXR::Create_Bottom_Level_AS(d3d, dxr, resources, model);
-		DXR::Create_Top_Level_AS(d3d, dxr, resources);
-		DXR::Create_DXR_Output(d3d, resources);
-		DXR::Create_Descriptor_Heaps(d3d, dxr, resources, model);	
-		DXR::Create_RayGen_Program(d3d, dxr, shaderCompiler);
-		DXR::Create_Miss_Program(d3d, dxr, shaderCompiler);
-		DXR::Create_Closest_Hit_Program(d3d, dxr, shaderCompiler);
-		DXR::Create_Pipeline_State_Object(d3d, dxr);
-		DXR::Create_Shader_Table(d3d, dxr, resources);
+		// Create DXR specific bearResources
+		DXR::Create_Bottom_Level_AS(d3d, mainDXR, bearResources, *bearResources.model);
+		DXR::Create_Bottom_Level_AS(d3d, auxDXR, crystalResources, *crystalResources.model);
+
+		DXR::Create_Bottom_Level_AS_Instance(d3d, mainDXR, bearResources);
+		DXR::Create_Bottom_Level_AS_Instance(d3d, auxDXR, crystalResources);
+		DXR::Create_Top_Level_AS(d3d, mainDXR, auxDXR, bearResources);
+
+
+		DXR::Create_DXR_Output(d3d, bearResources);
+		DXR::Create_Descriptor_Heaps(d3d, mainDXR, bearResources, auxResources, crystalResources);
+		DXR::Create_RayGen_Program(d3d, mainDXR, shaderCompiler);
+		DXR::Create_Miss_Program(d3d, mainDXR, shaderCompiler);
+		DXR::Create_Closest_Hit_Program(d3d, mainDXR, shaderCompiler);
+		DXR::Create_Pipeline_State_Object(d3d, mainDXR);
+		DXR::Create_Shader_Table(d3d, mainDXR, bearResources);
 
 		d3d.cmdList->Close();
 		ID3D12CommandList* pGraphicsList = { d3d.cmdList };
@@ -97,12 +125,12 @@ public:
 	
 	void Update() 
 	{
-		D3DResources::Update_View_CB(d3d, resources);
+		D3DResources::Update_View_CB(d3d, bearResources);
 	}
 
 	void Render() 
 	{		
-		DXR::Build_Command_List(d3d, dxr, resources);
+		DXR::Build_Command_List(d3d, mainDXR, bearResources);
 		D3D12::Present(d3d);
 		D3D12::MoveToNextFrame(d3d);
 		D3D12::Reset_CommandList(d3d);
@@ -113,8 +141,9 @@ public:
 		D3D12::WaitForGPU(d3d);
 		CloseHandle(d3d.fenceEvent);
 
-		DXR::Destroy(dxr);
-		D3DResources::Destroy(resources);		
+		DXR::Destroy(mainDXR);
+		D3DResources::Destroy(bearResources);
+		D3DResources::Destroy(crystalResources);
 		D3DShaders::Destroy(shaderCompiler);
 		D3D12::Destroy(d3d);
 
@@ -123,20 +152,73 @@ public:
 	
 private:
 	HWND window;
-	Model model;
-	Material material;
+	// Model model;
+	// Material material;
 
-	DXRGlobal dxr = {};
+	DXRGlobal mainDXR = {};
+	DXRGlobal auxDXR = {};
 	D3D12Global d3d = {};
-	D3D12Resources resources = {};
+	D3D12Resources bearResources = {};
+	D3D12Resources crystalResources = {};
 	D3D12ShaderCompilerInfo shaderCompiler;
+	D3D12Resources auxResources = {};
 };
+
+static std::wstring GetLatestWinPixGpuCapturerPath()
+{
+	LPWSTR programFilesPath = nullptr;
+	SHGetKnownFolderPath(FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, NULL, &programFilesPath);
+
+	std::wstring pixSearchPath = programFilesPath + std::wstring(L"\\Microsoft PIX\\*");
+
+	WIN32_FIND_DATA findData;
+	bool foundPixInstallation = false;
+	wchar_t newestVersionFound[MAX_PATH];
+
+	HANDLE hFind = FindFirstFile(pixSearchPath.c_str(), &findData);
+	if (hFind != INVALID_HANDLE_VALUE)
+	{
+		do
+		{
+			if (((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY) &&
+				(findData.cFileName[0] != '.'))
+			{
+				if (!foundPixInstallation || wcscmp(newestVersionFound, findData.cFileName) <= 0)
+				{
+					foundPixInstallation = true;
+					StringCchCopy(newestVersionFound, _countof(newestVersionFound), findData.cFileName);
+				}
+			}
+		} while (FindNextFile(hFind, &findData) != 0);
+	}
+
+	FindClose(hFind);
+
+	if (!foundPixInstallation)
+	{
+		// TODO: Error, no PIX installation found
+	}
+
+	wchar_t output[MAX_PATH];
+	StringCchCopy(output, pixSearchPath.length(), pixSearchPath.data());
+	StringCchCat(output, MAX_PATH, &newestVersionFound[0]);
+	StringCchCat(output, MAX_PATH, L"\\WinPixGpuCapturer.dll");
+
+	return &output[0];
+}
+
 
 /**
  * Program entry point.
  */
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) 
-{	
+int WINAPI wmain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) 
+{
+	// Check to see if a copy of WinPixGpuCapturer.dll has already been injected into the application.
+// This may happen if the application is launched through the PIX UI. 
+	if (GetModuleHandle(L"WinPixGpuCapturer.dll") == 0)
+	{
+		LoadLibrary(GetLatestWinPixGpuCapturerPath().c_str());
+	}
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
 

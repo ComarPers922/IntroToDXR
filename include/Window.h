@@ -33,6 +33,9 @@
 
 #include <Windows.h>
 
+template<typename T>
+class Singleton;
+
 namespace Window
 {
 	HRESULT Create(LONG width, LONG height, HINSTANCE& instance, HWND &window, LPCWSTR title);

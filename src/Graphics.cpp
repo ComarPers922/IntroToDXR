@@ -29,7 +29,11 @@
 #include <atlcomcli.h>
 
 #include "Graphics.h"
+
+#include <iostream>
+
 #include "Utils.h"
+#include "Camera.h"
 
 using namespace std;
 using namespace DirectX;
@@ -109,6 +113,51 @@ void Create_Texture(D3D12Global &d3d, D3D12Resources &resources, Material &mater
 
 	// Create the upload heap
 	hr = d3d.device->CreateCommittedResource(&UploadHeapProperties, D3D12_HEAP_FLAG_NONE, &resourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&resources.textureUploadResource));
+	Utils::Validate(hr, L"Error: failed to create texture upload heap!");
+#if NAME_D3D_RESOURCES
+	resources.textureUploadResource->SetName(L"Texture Upload Buffer");
+#endif
+
+	// Upload the texture to the GPU
+	Upload_Texture(d3d, resources.texture, resources.textureUploadResource, texture);
+}
+
+void Create_Texture(D3D12Global& d3d, D3D12Resources& resources, const std::string& texPath)
+{
+	TextureInfo texture = Utils::LoadTexture(texPath);
+
+	// Describe the texture
+	D3D12_RESOURCE_DESC textureDesc = {};
+	textureDesc.Width = texture.width;
+	textureDesc.Height = texture.height;
+	textureDesc.MipLevels = 1;
+	textureDesc.DepthOrArraySize = 1;
+	textureDesc.SampleDesc.Count = 1;
+	textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+
+	// Create the texture resource
+	HRESULT hr = d3d.device->CreateCommittedResource(&DefaultHeapProperties, D3D12_HEAP_FLAG_NONE,
+		&textureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&resources.texture));
+	Utils::Validate(hr, L"Error: failed to create texture!");
+#if NAME_D3D_RESOURCES
+	resources.texture->SetName(L"Texture");
+#endif
+
+	// Describe the resource
+	D3D12_RESOURCE_DESC resourceDesc = {};
+	resourceDesc.Width = (texture.width * texture.height * texture.stride);
+	resourceDesc.Height = 1;
+	resourceDesc.DepthOrArraySize = 1;
+	resourceDesc.MipLevels = 1;
+	resourceDesc.SampleDesc.Count = 1;
+	resourceDesc.Format = DXGI_FORMAT_UNKNOWN;
+	resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+
+	// Create the upload heap
+	hr = d3d.device->CreateCommittedResource(&UploadHeapProperties, D3D12_HEAP_FLAG_NONE,
+		&resourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&resources.textureUploadResource));
 	Utils::Validate(hr, L"Error: failed to create texture upload heap!");
 #if NAME_D3D_RESOURCES
 	resources.textureUploadResource->SetName(L"Texture Upload Buffer");
@@ -275,14 +324,15 @@ void Create_View_CB(D3D12Global &d3d, D3D12Resources &resources)
 /**
 * Create and initialize the material constant buffer.
 */
-void Create_Material_CB(D3D12Global &d3d, D3D12Resources &resources, const Material &material) 
+void Create_Material_CB(D3D12Global &d3d, D3D12Resources &resources, D3D12Resources& crystalResourcess)
 {
 	Create_Constant_Buffer(d3d, &resources.materialCB, sizeof(MaterialCB));
 #if NAME_D3D_RESOURCES
 	resources.materialCB->SetName(L"Material Constant Buffer");
 #endif
 
-	resources.materialCBData.resolution = XMFLOAT4(material.textureResolution, 0.f, 0.f, 0.f);
+	resources.materialCBData.resolution = XMFLOAT4(resources.material.textureResolution, 0.f, 0.f, 0.f);
+	resources.materialCBData.crystalResolution = XMFLOAT4(crystalResourcess.material.textureResolution, 0.f, 0.f, 0.f);
 
 	HRESULT hr = resources.materialCB->Map(0, nullptr, reinterpret_cast<void**>(&resources.materialCBStart));
 	Utils::Validate(hr, L"Error: failed to map Material constant buffer!");
@@ -316,19 +366,18 @@ void Create_Descriptor_Heaps(D3D12Global &d3d, D3D12Resources &resources)
 */
 void Update_View_CB(D3D12Global &d3d, D3D12Resources &resources) 
 {
-	const float rotationSpeed = 0.005f;
+	constexpr auto speed = 0.0009f;
+	constexpr auto up = XMFLOAT3(0.f, 1.f, 0.f);
+	static Camera camera(d3d.width, d3d.height);
+	static bool inited = false;
+	const float rotationSpeed = 1.f;
 	XMMATRIX view, invView;
-	XMFLOAT3 eye, focus, up;
-	float aspect, fov;
-
-	resources.eyeAngle.x += rotationSpeed;
 
 #if _DEBUG
-	float x = 2.f * cosf(resources.eyeAngle.x);
-	float y = 0.f;
-	float z = 2.25f + 2.f * sinf(resources.eyeAngle.x);
-
-	focus = XMFLOAT3(0.f, 0.f, 0.f);
+	if (!inited)
+	{
+		camera.pos.z = -1.f;
+	}
 #else
 	float x = 8.f * cosf(resources.eyeAngle.x);
 	float y = 1.5f + 1.5f * cosf(resources.eyeAngle.x);
@@ -336,21 +385,84 @@ void Update_View_CB(D3D12Global &d3d, D3D12Resources &resources)
 	focus = XMFLOAT3(0.f, 1.75f, 0.f);
 #endif
 
-	eye = XMFLOAT3(x, y, z);
-	up = XMFLOAT3(0.f, 1.f, 0.f);
+	if (Singleton<KeyBoardStatus>::instance & FORWARD)
+	{
+		// camera.pos.z += speed;
+		camera.pos = camera.pos + camera.forwardDir * speed;
+	}
+	else if (Singleton<KeyBoardStatus>::instance & BACK)
+	{
+		// camera.pos.z -= speed;
+		camera.pos = camera.pos - camera.forwardDir * speed;
+	}
 
-	aspect = (float)d3d.width / (float)d3d.height;
-	fov = 65.f * (XM_PI / 180.f);							// convert to radians
+	auto rightDir = Cross(up, camera.forwardDir);
 
-	resources.rotationOffset += rotationSpeed;
+	if (Singleton<KeyBoardStatus>::instance & LEFT)
+	{
+		camera.pos = camera.pos - rightDir * speed;
+	}
+	else if (Singleton<KeyBoardStatus>::instance & RIGHT)
+	{
+		camera.pos = camera.pos + rightDir * speed;
+	}
 
-	view = XMMatrixLookAtLH(XMLoadFloat3(&eye), XMLoadFloat3(&focus), XMLoadFloat3(&up));
-	invView = XMMatrixInverse(NULL, view);
+	if (Singleton<KeyBoardStatus>::instance == UP)
+	{
+		camera.pos = camera.pos + up * speed;
+	}
+	else if (Singleton<KeyBoardStatus>::instance == DOWN)
+	{
+		camera.pos = camera.pos - up * speed;
+	}
 
+
+	if (Singleton<MouseStatus>::instance.isRightClicked)
+	{
+		auto& mouseStatus = Singleton<MouseStatus>::instance;
+
+		POINT mousePoint;
+		GetCursorPos(&mousePoint);
+		mouseStatus.SetCurPos(mousePoint.x, mousePoint.y);
+
+		XMFLOAT2 curMouseDelta;
+		XMStoreFloat2(&curMouseDelta, mouseStatus.GetDelta());
+
+		auto tempVec = XMLoadFloat3(&camera.forwardDir);
+
+		auto quat = XMQuaternionRotationAxis(XMLoadFloat3(&up), curMouseDelta.x * rotationSpeed);
+		tempVec = XMVector3Rotate(tempVec, quat);
+
+		quat = XMQuaternionRotationAxis(XMLoadFloat3(&rightDir), curMouseDelta.y * rotationSpeed);
+		tempVec = XMVector3Rotate(tempVec, quat);
+
+		XMStoreFloat3(&camera.forwardDir, tempVec);
+
+		SetCursorPos(mouseStatus.rBtnPosX, mouseStatus.rBtnPosY);
+	}
+
+	auto focus = camera.pos + camera.forwardDir;
+
+	view = XMMatrixLookAtLH(XMLoadFloat3(&camera.pos), XMLoadFloat3(&focus), XMLoadFloat3(&up));
+	invView = XMMatrixInverse(nullptr, view);
 	resources.viewCBData.view = XMMatrixTranspose(invView);
-	resources.viewCBData.viewOriginAndTanHalfFovY = XMFLOAT4(eye.x, eye.y, eye.z, tanf(fov * 0.5f));
+	resources.viewCBData.viewOriginAndTanHalfFovY = XMFLOAT4(
+		camera.pos.x,
+		camera.pos.y,
+		camera.pos.z,
+		tanf(camera.verticalFOV * 0.5f));
+
 	resources.viewCBData.resolution = XMFLOAT2((float)d3d.width, (float)d3d.height);
+
+	//auto rotQuat = XMQuaternionRotationAxis(XMLoadFloat3(&up), 0.5f * rotationSpeed);
+
+	//auto lightDirVec = XMLoadFloat3(&resources.viewCBData.lightDir);
+	//lightDirVec = XMVector3Rotate(lightDirVec, rotQuat);
+	//// lightDirVec = XMVector3Normalize(lightDirVec);
+	//XMStoreFloat3(&resources.viewCBData.lightDir, lightDirVec);
+
 	memcpy(resources.viewCBStart, &resources.viewCBData, sizeof(resources.viewCBData));
+	inited = true;
 }
 
 /**
@@ -839,17 +951,27 @@ void Create_Bottom_Level_AS(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &re
 	d3d.cmdList->ResourceBarrier(1, &uavBarrier);
 }
 
-/**
-* Create the top level acceleration structure and its associated buffers.
-*/
-void Create_Top_Level_AS(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resources) 
+void Create_Bottom_Level_AS_Instance(D3D12Global& d3d, DXRGlobal& dxr, D3D12Resources& resources)
 {
+	XMFLOAT3X4A transformation;
+	XMStoreFloat3x4A(&transformation, resources.model->transformation);
+
 	// Describe the TLAS geometry instance(s)
 	D3D12_RAYTRACING_INSTANCE_DESC instanceDesc = {};
-	instanceDesc.InstanceID = 0;
+	instanceDesc.InstanceID = Singleton<InstanceIDPool>::instance.GetNewID();
 	instanceDesc.InstanceContributionToHitGroupIndex = 0;
-	instanceDesc.InstanceMask = 0xFF;
-	instanceDesc.Transform[0][0] = instanceDesc.Transform[1][1] = instanceDesc.Transform[2][2] = 1;
+	instanceDesc.InstanceMask = 0x01;
+	if (instanceDesc.InstanceID > 0)
+	{
+		instanceDesc.InstanceMask = 0x02;
+	}
+	for (size_t x = 0; x < 3; x++)
+	{
+		for (size_t y = 0; y < 4; y++)
+		{
+			instanceDesc.Transform[x][y] = transformation.m[x][y];
+		}
+	}
 	instanceDesc.AccelerationStructure = dxr.BLAS.pResult->GetGPUVirtualAddress();
 	instanceDesc.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_FRONT_COUNTERCLOCKWISE;
 
@@ -869,16 +991,41 @@ void Create_Top_Level_AS(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resou
 	dxr.TLAS.pInstanceDesc->Map(0, nullptr, (void**)&pData);
 	memcpy(pData, &instanceDesc, sizeof(instanceDesc));
 	dxr.TLAS.pInstanceDesc->Unmap(0, nullptr);
+}
 
+/**
+* Create the top level acceleration structure and its associated buffers.
+*/
+void Create_Top_Level_AS(D3D12Global &d3d, DXRGlobal &dxr, DXRGlobal& auxDXR, D3D12Resources &mainResources)
+{
 	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS buildFlags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+
+	D3D12_GPU_VIRTUAL_ADDRESS instanceDescs[2] = { dxr.TLAS.pInstanceDesc->GetGPUVirtualAddress(), auxDXR.TLAS.pInstanceDesc->GetGPUVirtualAddress() };
+
+	UINT64 bufferSize = 2 * sizeof(D3D12_GPU_VIRTUAL_ADDRESS);
+
+	D3D12BufferCreateInfo TLASBufferInfo;
+	TLASBufferInfo.size = bufferSize;
+	TLASBufferInfo.heapType = D3D12_HEAP_TYPE_UPLOAD;
+	TLASBufferInfo.flags = D3D12_RESOURCE_FLAG_NONE;
+	TLASBufferInfo.state = D3D12_RESOURCE_STATE_GENERIC_READ;
+
+	D3DResources::Create_Buffer(d3d, TLASBufferInfo, &d3d.globalGeometryResources);
+
+	void* pData;
+	d3d.globalGeometryResources->Map(0, nullptr, &pData);
+	memcpy(pData, instanceDescs, bufferSize);
+	d3d.globalGeometryResources->Unmap(0, nullptr);
 
 	// Get the size requirements for the TLAS buffers
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS ASInputs = {};
 	ASInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
-	ASInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-	ASInputs.InstanceDescs = dxr.TLAS.pInstanceDesc->GetGPUVirtualAddress();
-	ASInputs.NumDescs = 1;
-	ASInputs.Flags = buildFlags;
+	// ASInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+	// ASInputs.InstanceDescs = dxr.TLAS.pInstanceDesc->GetGPUVirtualAddress();
+	ASInputs.NumDescs = 2;
+	ASInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY_OF_POINTERS;
+	ASInputs.InstanceDescs = d3d.globalGeometryResources->GetGPUVirtualAddress();
+
 
 	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO ASPreBuildInfo = {};
 	d3d.device->GetRaytracingAccelerationStructurePrebuildInfo(&ASInputs, &ASPreBuildInfo);
@@ -946,7 +1093,7 @@ void Create_RayGen_Program(D3D12Global &d3d, DXRGlobal &dxr, D3D12ShaderCompiler
 	ranges[1].OffsetInDescriptorsFromTableStart = 2;
 
 	ranges[2].BaseShaderRegister = 0;
-	ranges[2].NumDescriptors = 4;
+	ranges[2].NumDescriptors = 8;
 	ranges[2].RegisterSpace = 0;
 	ranges[2].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	ranges[2].OffsetInDescriptorsFromTableStart = 3;
@@ -965,9 +1112,9 @@ void Create_RayGen_Program(D3D12Global &d3d, DXRGlobal &dxr, D3D12ShaderCompiler
 	rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
 
 	// Create the root signature
-	dxr.rgs.pRootSignature = D3D12::Create_Root_Signature(d3d, rootDesc);
+	d3d.localRootSignature = D3D12::Create_Root_Signature(d3d, rootDesc);
 #if NAME_D3D_RESOURCES
-	dxr.rgs.pRootSignature->SetName(L"DXR RGS Root Signature");
+	d3d.localRootSignature->SetName(L"DXR RGS Root Signature");
 #endif
 }
 
@@ -1077,7 +1224,7 @@ void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr)
 
 	// Add a state subobject for the shader payload configuration
 	D3D12_RAYTRACING_SHADER_CONFIG shaderDesc = {};
-	shaderDesc.MaxPayloadSizeInBytes = sizeof(XMFLOAT4);	// RGB and HitT
+	shaderDesc.MaxPayloadSizeInBytes = 128;
 	shaderDesc.MaxAttributeSizeInBytes = D3D12_RAYTRACING_MAX_ATTRIBUTE_SIZE_IN_BYTES;
 
 	D3D12_STATE_SUBOBJECT shaderConfigObject = {};
@@ -1104,7 +1251,7 @@ void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr)
 	// Add a state subobject for the shared root signature 
 	D3D12_STATE_SUBOBJECT rayGenRootSigObject = {};
 	rayGenRootSigObject.Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
-	rayGenRootSigObject.pDesc = &dxr.rgs.pRootSignature;
+	rayGenRootSigObject.pDesc = &d3d.localRootSignature;
 
 	subobjects[index++] = rayGenRootSigObject;
 
@@ -1125,13 +1272,13 @@ void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr)
 
 	D3D12_STATE_SUBOBJECT globalRootSig;
 	globalRootSig.Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
-	globalRootSig.pDesc = &dxr.miss.pRootSignature;
+	globalRootSig.pDesc = &d3d.globalRootSignature;
 
 	subobjects[index++] = globalRootSig;
 
 	// Add a state subobject for the ray tracing pipeline config
 	D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig = {};
-	pipelineConfig.MaxTraceRecursionDepth = 1;
+	pipelineConfig.MaxTraceRecursionDepth = 4;
 
 	D3D12_STATE_SUBOBJECT pipelineConfigObject = {};
 	pipelineConfigObject.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
@@ -1221,7 +1368,11 @@ void Create_Shader_Table(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resou
 /**
 * Create the DXR descriptor heap for CBVs, SRVs, and the output UAV.
 */
-void Create_Descriptor_Heaps(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resources, const Model &model)
+void Create_Descriptor_Heaps(D3D12Global &d3d,
+	DXRGlobal &dxr,
+	D3D12Resources& resources,
+	D3D12Resources& auxResources,
+	D3D12Resources& crystalResources)
 {
 	// Describe the CBV/SRV/UAV heap
 	// Need 7 entries:
@@ -1232,8 +1383,9 @@ void Create_Descriptor_Heaps(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &r
 	// 1 SRV for the index buffer
 	// 1 SRV for the vertex buffer
 	// 1 SRV for the texture
+	// 1 SRV for the aux texture
 	D3D12_DESCRIPTOR_HEAP_DESC desc = {};
-	desc.NumDescriptors = 7;
+	desc.NumDescriptors = 11;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 
@@ -1286,7 +1438,7 @@ void Create_Descriptor_Heaps(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &r
 	indexSRVDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
 	indexSRVDesc.Buffer.StructureByteStride = 0;
 	indexSRVDesc.Buffer.FirstElement = 0;
-	indexSRVDesc.Buffer.NumElements = (static_cast<UINT>(model.indices.size()) * sizeof(UINT)) / sizeof(float);
+	indexSRVDesc.Buffer.NumElements = (static_cast<UINT>(resources.model->indices.size()) * sizeof(UINT)) / sizeof(float);
 	indexSRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 
 	handle.ptr += handleIncrement;
@@ -1299,11 +1451,37 @@ void Create_Descriptor_Heaps(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &r
 	vertexSRVDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
 	vertexSRVDesc.Buffer.StructureByteStride = 0;
 	vertexSRVDesc.Buffer.FirstElement = 0;
-	vertexSRVDesc.Buffer.NumElements = (static_cast<UINT>(model.vertices.size()) * sizeof(Vertex)) / sizeof(float);
+	vertexSRVDesc.Buffer.NumElements = (static_cast<UINT>(resources.model->vertices.size()) * sizeof(Vertex)) / sizeof(float);
 	vertexSRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 
 	handle.ptr += handleIncrement;
 	d3d.device->CreateShaderResourceView(resources.vertexBuffer, &vertexSRVDesc, handle);
+
+	// Create the index buffer SRV
+	D3D12_SHADER_RESOURCE_VIEW_DESC crystalIndexSRVDesc;
+	crystalIndexSRVDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	crystalIndexSRVDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+	crystalIndexSRVDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+	crystalIndexSRVDesc.Buffer.StructureByteStride = 0;
+	crystalIndexSRVDesc.Buffer.FirstElement = 0;
+	crystalIndexSRVDesc.Buffer.NumElements = (static_cast<UINT>(crystalResources.model->indices.size()) * sizeof(UINT)) / sizeof(float);
+	crystalIndexSRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+	handle.ptr += handleIncrement;
+	d3d.device->CreateShaderResourceView(crystalResources.indexBuffer, &crystalIndexSRVDesc, handle);
+
+	// Create the vertex buffer SRV
+	D3D12_SHADER_RESOURCE_VIEW_DESC crystalVerticesSRVDesc;
+	crystalVerticesSRVDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	crystalVerticesSRVDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+	crystalVerticesSRVDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+	crystalVerticesSRVDesc.Buffer.StructureByteStride = 0;
+	crystalVerticesSRVDesc.Buffer.FirstElement = 0;
+	crystalVerticesSRVDesc.Buffer.NumElements = (static_cast<UINT>(crystalResources.model->vertices.size()) * sizeof(Vertex)) / sizeof(float);
+	crystalVerticesSRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+	handle.ptr += handleIncrement;
+	d3d.device->CreateShaderResourceView(crystalResources.vertexBuffer, &crystalVerticesSRVDesc, handle);
 
 	// Create the material texture SRV
 	D3D12_SHADER_RESOURCE_VIEW_DESC textureSRVDesc = {};
@@ -1315,6 +1493,26 @@ void Create_Descriptor_Heaps(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &r
 
 	handle.ptr += handleIncrement;
 	d3d.device->CreateShaderResourceView(resources.texture, &textureSRVDesc, handle);
+
+	D3D12_SHADER_RESOURCE_VIEW_DESC auxTextureSRVDesc = {};
+	auxTextureSRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	auxTextureSRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	auxTextureSRVDesc.Texture2D.MipLevels = 1;
+	auxTextureSRVDesc.Texture2D.MostDetailedMip = 0;
+	auxTextureSRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+	handle.ptr += handleIncrement;
+	d3d.device->CreateShaderResourceView(auxResources.texture, &auxTextureSRVDesc, handle);
+
+	D3D12_SHADER_RESOURCE_VIEW_DESC crystalTextureSRVDesc = {};
+	auxTextureSRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	auxTextureSRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	auxTextureSRVDesc.Texture2D.MipLevels = 1;
+	auxTextureSRVDesc.Texture2D.MostDetailedMip = 0;
+	auxTextureSRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+	handle.ptr += handleIncrement;
+	d3d.device->CreateShaderResourceView(crystalResources.texture, &auxTextureSRVDesc, handle);
 }
 
 /**

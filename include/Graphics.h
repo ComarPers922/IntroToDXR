@@ -29,6 +29,8 @@
 
 #include "Structures.h"
 
+const std::string CYAN_TEX_PATH("textures\\fondo-color-cian.jpg");
+
 static const D3D12_HEAP_PROPERTIES UploadHeapProperties =
 {
 	D3D12_HEAP_TYPE_UPLOAD,
@@ -45,16 +47,54 @@ static const D3D12_HEAP_PROPERTIES DefaultHeapProperties =
 	0, 0
 };
 
+inline XMFLOAT3 operator+(const XMFLOAT3& a, const XMFLOAT3& b)
+{
+	return XMFLOAT3{ a.x + b.x, a.y + b.y, a.z + b.z };
+}
+
+inline XMFLOAT3 operator-(const XMFLOAT3& a)
+{
+	return XMFLOAT3{ -a.x, -a.y, -a.z };
+}
+
+inline XMFLOAT3 operator-(const XMFLOAT3& a, const XMFLOAT3& b)
+{
+	return a + (-b);
+}
+
+inline XMFLOAT3 operator*(const XMFLOAT3& a, const float& b)
+{
+	return XMFLOAT3{ a.x * b, a.y * b, a.z * b };
+}
+
+inline XMFLOAT3 Cross(const XMFLOAT3& left, const XMFLOAT3& right)
+{
+	XMFLOAT3 returnValue;
+	returnValue.x = left.y * right.z - left.z * right.y;
+	returnValue.y = left.z * right.x - left.x * right.z;
+	returnValue.z = left.x * right.y - left.y * right.x;
+
+	return returnValue;
+}
+
+//inline XMFLOAT3& operator+(XMFLOAT3& a, const XMFLOAT3& b)
+//{
+//	a = XMFLOAT3{ a.x + b.x, a.y + b.y, a.z + b.z };
+//	return a;
+//}
+
+
 namespace D3DResources
 {
 	void Create_Buffer(D3D12Global &d3d, D3D12BufferCreateInfo &info, ID3D12Resource** ppResource);
 	void Create_Texture(D3D12Global &d3d, D3D12Resources &resources, Material &material);
+	void Create_Texture(D3D12Global& d3d, D3D12Resources& resources, const std::string& texPath);
 	void Create_Vertex_Buffer(D3D12Global &d3d, D3D12Resources &resources, Model &model);
 	void Create_Index_Buffer(D3D12Global &d3d, D3D12Resources &resources, Model &model);
 	void Create_Constant_Buffer(D3D12Global &d3d, ID3D12Resource** buffer, UINT64 size);
 	void Create_BackBuffer_RTV(D3D12Global &d3d, D3D12Resources &resources);
 	void Create_View_CB(D3D12Global &d3d, D3D12Resources &resources);
-	void Create_Material_CB(D3D12Global &d3d, D3D12Resources &resources, const Material &material);
+	void Create_Material_CB(D3D12Global &d3d, D3D12Resources &resources, D3D12Resources& crystalResources);
 	void Create_Descriptor_Heaps(D3D12Global &d3d, D3D12Resources &resources);
 
 	void Update_View_CB(D3D12Global &d3d, D3D12Resources &resources);
@@ -96,13 +136,18 @@ namespace D3D12
 namespace DXR
 {	
 	void Create_Bottom_Level_AS(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resources, Model &model);
-	void Create_Top_Level_AS(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resources);
+	void Create_Bottom_Level_AS_Instance(D3D12Global& d3d, DXRGlobal& dxr, D3D12Resources& resources);
+	void Create_Top_Level_AS(D3D12Global &d3d, DXRGlobal &dxr, DXRGlobal &auxDXR, D3D12Resources &mainResources);
 	void Create_RayGen_Program(D3D12Global &d3d, DXRGlobal &dxr, D3D12ShaderCompilerInfo &shaderCompiler);
 	void Create_Miss_Program(D3D12Global &d3d, DXRGlobal &dxr, D3D12ShaderCompilerInfo &shaderCompiler);
 	void Create_Closest_Hit_Program(D3D12Global &d3d, DXRGlobal &dxr, D3D12ShaderCompilerInfo &shaderCompiler);
 	void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr);
 	void Create_Shader_Table(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resources);
-	void Create_Descriptor_Heaps(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resources, const Model &model);
+	void Create_Descriptor_Heaps(D3D12Global &d3d,
+		DXRGlobal &dxr,
+		D3D12Resources &resources,
+		D3D12Resources& auxResources,
+		D3D12Resources& crystalResources);
 	void Create_DXR_Output(D3D12Global &d3d, D3D12Resources &resources);
 
 	void Build_Command_List(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resources);

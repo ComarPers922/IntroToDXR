@@ -52,3 +52,73 @@
 #define SAFE_DELETE( x ) { if( x ) delete x; x = NULL; }
 #define SAFE_DELETE_ARRAY( x ) { if( x ) delete[] x; x = NULL; }
 #define ALIGN(_alignment, _val) (((_val + _alignment - 1) / _alignment) * _alignment)
+
+enum KeyBoardStatus
+{
+	NONE = 0, FORWARD = 1, BACK = 2, UP = 4, DOWN = 8, LEFT = 16, RIGHT = 32
+};
+
+class MouseStatus
+{
+public:
+	const int SCREEN_WIDTH = GetSystemMetrics(SM_CXFULLSCREEN);
+	const int SCREEN_HEIGHT = GetSystemMetrics(SM_CYFULLSCREEN);
+
+	bool isRightClicked = false;
+	void SetCurPos(const int& x, const int& y)
+	{
+		lastX = curX;
+		lastY = curY;
+
+		curX = x;
+		curY = y;
+	}
+
+	void SetRBtnPos(const int& x, const int& y)
+	{
+		rBtnPosX = x;
+		rBtnPosY = y;
+	}
+
+	DirectX::FXMVECTOR GetDelta()
+	{
+		auto deltaX = (curX - rBtnPosX) / SCREEN_WIDTH;
+		if (abs(deltaX) < 0.01f)
+		{
+			deltaX = 0;
+		}
+
+		auto deltaY = (curY - rBtnPosY) / SCREEN_HEIGHT;
+		if (abs(deltaY) < 0.01f)
+		{
+			deltaY = 0;
+		}
+
+		return DirectX::FXMVECTOR{ deltaX, deltaY };
+	}
+	float rBtnPosX = 0, rBtnPosY = 0;
+
+private:
+	float curX = 0, curY = 0, lastX = 0, lastY = 0;
+};
+
+class InstanceIDPool
+{
+private:
+	UINT curID = 0;
+public:
+	UINT GetNewID()
+	{
+		return curID++;
+	}
+};
+
+template<typename T>
+class Singleton
+{
+public:
+	static T instance;
+};
+
+template<typename T>
+T Singleton<T>::instance;
